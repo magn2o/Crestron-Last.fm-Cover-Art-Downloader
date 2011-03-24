@@ -1,0 +1,5 @@
+Returns Small, Medium, Large and Extra Large artwork URLs. 
+
+Only requires Artist and Album name.
+
+Must have Last.fm API key (free). Obtain at http://www.lastfm.com/api/account.
