@@ -1,0 +1,215 @@
+/*
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in the
+ *       documentation and/or other materials provided with the distribution.
+ *     * Neither the name of "Growl for Crestron" nor the
+ *       names of its contributors may be used to endorse or promote products
+ *       derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR 
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
+#symbol_name "Last.fm Cover Art Downloader"
+#category "0"
+
+#define_constant LAST_FM_HOST "ws.audioscrobbler.com"
+#define_constant LAST_FM_PORT 80
+
+string_input _skip_;
+string_input Artist[255];
+string_input Album[255];
+
+digital_output _skip_;
+digital_output Not_Found_F;
+
+string_output _skip_;
+string_output Artwork[4];
+
+tcp_client pSocket[1024];
+
+string_parameter API_Key[32];
+
+#begin_parameter_properties API_Key
+	propValidUnits = unitString;
+	propShortDescription = "Last.FM API Key";
+#end_parameter_properties
+
+integer g_bConnected;
+
+string g_szQuery[1024];
+string g_szMetaData[1][256];
+
+string_function fnURLEncode(
+	string szText)
+{
+	integer i;
+	integer nByte;
+	string szChar[3];
+	string szEncodedText[256];
+	
+	for(i=1 to len(szText))
+	{
+		nByte = byte(szText, i);
+		
+		switch(nByte)
+		{
+			/* Reserved characters */
+			case(36): szChar = "%24"; // Dollar ("$")
+			case(38): szChar = "%26"; // Ampersand ("&")
+			case(43): szChar = "%2B"; // Plus ("+")
+			case(44): szChar = "%2C"; // Comma (",")
+			case(47): szChar = "%2F"; // Forward slash/Virgule ("/")
+			case(58): szChar = "%3A"; // Colon (":")
+			case(59): szChar = "%3B"; // Semi-colon (";")
+			case(61): szChar = "%3D"; // Equals ("=")
+			case(63): szChar = "%3F"; // Question mark ("?")
+			case(64): szChar = "%40"; // 'At' symbol ("@")
+
+			/* Unsafe characters */
+			case(32):  szChar = "%20"; // Space
+			case(34):  szChar = "%22"; // Quotation marks
+			case(60):  szChar = "%3C"; // 'Less Than' symbol ("<")
+			case(62):  szChar = "%3E"; // 'Greater Than' symbol (">")
+			case(35):  szChar = "%23"; // 'Pound' character ("#")
+			case(37):  szChar = "%25"; // Percent character ("%")
+			case(123): szChar = "%7B"; // Left Curly Brace ("{")
+			case(125): szChar = "%7D"; // Right Curly Brace ("}")
+			case(124): szChar = "%7C"; // Vertical Bar/Pipe ("|")
+			case(92):  szChar = "%5C"; // Backslash ("\")
+			case(94):  szChar = "%5E"; // Caret ("^")
+			case(126): szChar = "%7E"; // Tilde ("~")
+			case(91):  szChar = "%5B"; // Left Square Bracket ("[")
+			case(93):  szChar = "%5D"; // Right Square Bracket ("]")
+			case(96):  szChar = "%60"; // Grave Accent ("`")
+			
+			default: szChar = chr(nByte);
+		}
+
+		szEncodedText = szEncodedText + szChar;		
+	}
+	
+	return(szEncodedText);
+}
+
+function fnSendQuery(
+	string szArtist,
+	string szAlbum)
+{
+	g_szQuery = "GET /2.0/?method=album.getinfo";
+	g_szQuery = g_szQuery + "&api_key=" + API_Key;
+	g_szQuery = g_szQuery + "&artist=" + fnURLEncode(szArtist);
+	g_szQuery = g_szQuery + "&album=" + fnURLEncode(szAlbum);
+	g_szQuery = g_szQuery + " HTTP/1.1\n";
+	g_szQuery = g_szQuery + "Host: " + LAST_FM_HOST + "\n\n";
+
+	setArray(Artwork, "");
+	setArray(g_szMetaData, "");
+	    
+	socketConnectClient(pSocket, LAST_FM_HOST, LAST_FM_PORT, 0);
+}
+
+string_function fnParseDelimitedText(
+	string szText,
+	string szAnchor,
+	string szDelimiter,
+	integer bCaseMatch)
+{
+	integer nPos;
+	integer nStart;
+	integer nRange;
+	string szValue[256];
+		
+	nPos = 0;
+	nStart = 0;
+	nRange = 0;
+	
+	if(bCaseMatch) nPos = find(szAnchor, szText);
+	else nPos = findNoCase(szAnchor, szText);
+	
+	if(nPos > 0)
+	{
+		nStart = nPos+len(szAnchor);
+
+		if(bCaseMatch) nRange = find(szDelimiter, szText, nStart);
+		else nRange = findNoCase(szDelimiter, szText, nStart);
+		
+		nRange = nRange-nStart;
+
+		szValue = mid(szText, nStart, nRange);
+		return(szValue);
+	}
+	else return("");
+}
+
+change Artist
+{
+	while(g_bConnected) processLogic();
+	
+	g_szMetaData[0] = Artist;
+	if(g_szMetaData[0] <> "" && g_szMetaData[1] <> "") fnSendQuery(g_szMetaData[0], g_szMetaData[1]);
+}
+
+change Album
+{
+	while(g_bConnected) processLogic();
+	
+	g_szMetaData[1] = Album;
+	if(g_szMetaData[0] <> "" && g_szMetaData[1] <> "") fnSendQuery(g_szMetaData[0], g_szMetaData[1]);
+}
+
+socketConnect pSocket
+{
+	g_bConnected = on;
+	socketSend(pSocket, g_szQuery);		
+}
+
+socketDisconnect pSocket
+{
+	g_bConnected = off;
+	g_szQuery = "";
+}
+
+socketReceive pSocket
+{
+	integer i;
+	string szData[1024];
+	string szImageURL[3][256];
+
+	socketDisconnectClient(pSocket);
+	
+	szData = pSocket.socketRxBuf;
+
+	szImageURL[0] = fnParseDelimitedText(szData, "<image size=\"small\">", "</image>", 1);
+	szImageURL[1] = fnParseDelimitedText(szData, "<image size=\"medium\">", "</image>", 1);
+	szImageURL[2] = fnParseDelimitedText(szData, "<image size=\"large\">", "</image>", 1);
+	szImageURL[3] = fnParseDelimitedText(szData, "<image size=\"extralarge\">", "</image>", 1);
+	
+	if(szImageURL[0] = "" && szImageURL[1] = "" && szImageURL[2] = "" && szImageURL[3] = "") Not_Found_F = on;
+	else
+	{
+		Not_Found_F = off;
+
+		for(i=0 to 3) Artwork[i+1] = szImageURL[i];
+	}
+}
+  
+function main()
+{
+	g_bConnected = off;
+	
+	g_szQuery  = "";
+    setArray(g_szMetaData, "");
+}
